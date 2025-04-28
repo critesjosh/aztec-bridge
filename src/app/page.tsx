@@ -1,103 +1,613 @@
-import Image from "next/image";
+'use client'
+import TextButton from '@/components/TextButton'
+import Image from 'next/image'
+import { Oval } from 'react-loader-spinner'
+import { ChangeEvent, useEffect, useState } from 'react'
+import { useMetaMask } from '@/hooks/useMetaMask'
+import { useAztecWallet } from '@/hooks/useAztecWallet'
+import { useBridge } from '@/hooks/useBridge'
+import StyledImage from '@/components/StyedImage'
+import clsxm from '@/utils/clsxm'
+import RootStyle from '@/components/RootStyle'
+
+const networks = {
+  send: {
+    id: 3,
+    img: '/assets/svg/ethereum.svg',
+    title: 'Ethereum',
+  },
+  received: {
+    id: 5,
+    img: '/assets/svg/aztec.svg',
+    title: 'Aztec',
+  },
+}
+
+const tokens = {
+  send: {
+    id: 1,
+    img: '/assets/svg/USDC.svg',
+    title: 'USDC',
+    about: 'Ethereum',
+    amount: '$50.27',
+    percentage: '+0.62%',
+  },
+  received: {
+    id: 3,
+    img: '/assets/svg/USDC.svg',
+    title: 'USDC',
+    about: 'USDC',
+    amount: '$970.10',
+    percentage: '+1.05%',
+  },
+}
+
+function LoadingContent({ label }: { label: string }) {
+  return (
+    <div className='flex justify-center gap-2'>
+      <Oval
+        height='20'
+        width='20'
+        color='#ccc'
+        visible={true}
+        ariaLabel='oval-loading'
+        secondaryColor='#ccc'
+        strokeWidth={6}
+        strokeWidthSecondary={6}
+      />
+      <span>{label}</span>
+    </div>
+  )
+}
+
+function BridgeActionButton({
+  inputAmount,
+  setInputAmount,
+}: {
+  inputAmount: string
+  setInputAmount: (amount: string) => void
+}) {
+  const {
+    address: metaMaskAddress,
+    isConnected: isMetaMaskConnected,
+    connect: connectMetaMask,
+    disconnect: disconnectMetaMask,
+  } = useMetaMask()
+
+  const {
+    account: aztecAccount,
+    address: aztecAddress,
+    isConnected: isAztecConnected,
+    isConnecting: isAztecConnecting,
+    connect: connectAztec,
+    disconnect: disconnectAztec,
+  } = useAztecWallet()
+
+  const {
+    loading,
+    error,
+    l1Balance,
+    l2Balance,
+    getL1Balance,
+    getL2Balance,
+    bridgeTokensToL2,
+    withdrawTokensToL1,
+    getL2ToL1MessageMembershipWitness,
+    mintL1Tokens,
+    // hasSBT,
+    // mintSBT,
+  } = useBridge()
+
+
+  // Local state for button logic
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [hasSoulboundToken, setHasSoulboundToken] = useState<boolean | null>(
+    null
+  )
+  const [hasAztecSBT, setHasAztecSBT] = useState<boolean | null>(null)
+  const [bridging, setBridging] = useState(false)
+  const [checkingSBT, setCheckingSBT] = useState(false)
+  const [buttonLoading, setButtonLoading] = useState(false)
+
+  // Balance checks
+  const hasL1 = !!l1Balance && parseFloat(l1Balance) > 0
+  // const hasL1 = true
+  // const hasL2 = !!l2Balance && parseFloat(l2Balance) > 0
+  const hasL2 = true
+
+  // Faucet placeholder
+  const handleFaucet = () => {
+    mintL1Tokens()
+  }
+
+  // SBT check and bridge logic
+  const checkSBTAndProceed = async () => {
+    if (!inputAmount || parseFloat(inputAmount) <= 0) {
+      alert('Please enter a valid amount')
+      return
+    }
+    setCheckingSBT(true)
+    try {
+      if (!isWithdrawing) {
+        // const hasToken = await hasSBT()
+        const hasToken = true
+        setHasSoulboundToken(hasToken)
+        if (!hasToken) {
+          alert('You need an SBT to bridge.')
+        } else {
+          setCheckingSBT(false)
+          await handleBridgeOrWithdraw()
+        }
+      } else {
+        // const hasAztecSBT = await checkAztecSBT()
+        const hasToken = false
+        setHasAztecSBT(hasToken)
+        if (!hasToken) {
+          alert('You need an Aztec SBT to withdraw.')
+        } else {
+          setCheckingSBT(false)
+          await handleBridgeOrWithdraw()
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check SBT status:', error)
+    } finally {
+      setCheckingSBT(false)
+    }
+  }
+
+  const handleBridgeOrWithdraw = async () => {
+    setBridging(true)
+    try {
+      if (!inputAmount || parseFloat(inputAmount) <= 0) {
+        alert('Please enter a valid amount')
+        return
+      }
+      const amount = BigInt(inputAmount)
+      try {
+        if (isWithdrawing) {
+          await withdrawTokensToL1(amount)
+        } else {
+          await bridgeTokensToL2(amount)
+        }
+      } finally {
+        // setBridging(false)
+      }
+    } catch (error) {
+      console.error('Operation failed:', error)
+      setBridging(false)
+    }
+  }
+
+  // Button click logic
+  const handleBridgeActionButton = async () => {
+    if (!isMetaMaskConnected) {
+      setButtonLoading(true)
+      try {
+        await connectMetaMask()
+      } finally {
+        setButtonLoading(false)
+      }
+    } else if (!isAztecConnected) {
+      setButtonLoading(true)
+      try {
+        await connectAztec()
+      } finally {
+        setButtonLoading(false)
+      }
+    } else if (!hasL1 || !hasL2) {
+      handleFaucet()
+    } else {
+      if (isWithdrawing ? hasSoulboundToken : hasAztecSBT) {
+        await handleBridgeOrWithdraw()
+      } else {
+        await checkSBTAndProceed()
+      }
+    }
+  }
+
+  // Button label
+  let buttonLabel = ''
+  if (!isMetaMaskConnected) {
+    buttonLabel = 'Connect MetaMask'
+  } else if (!isAztecConnected) {
+    buttonLabel = 'Connect Aztec'
+  } else if (!hasL1 || !hasL2) {
+    buttonLabel = 'Get Faucet'
+  } else {
+    buttonLabel = isWithdrawing ? 'Withdraw Tokens' : 'Bridge Tokens'
+  }
+
+  // Disabled state
+  // const isDisabled =
+  //   buttonLoading ||
+  //   bridging ||
+  //   checkingSBT ||
+  //   !inputAmount ||
+  //   (parseFloat(inputAmount) <= 0 &&
+  //     buttonLabel === (isWithdrawing ? 'Withdraw Tokens' : 'Bridge Tokens'))
+  const isDisabled = false
+
+  // Loading content
+  if (buttonLoading)
+    return (
+      <TextButton disabled>
+        <LoadingContent label='Connecting...' />
+      </TextButton>
+    )
+  if (checkingSBT)
+    return (
+      <TextButton disabled>
+        <LoadingContent label='Checking SBT Status...' />
+      </TextButton>
+    )
+  if (bridging)
+    return (
+      <TextButton disabled>
+        <LoadingContent
+          label={isWithdrawing ? 'Withdrawing Tokens...' : 'Bridging Tokens...'}
+        />
+      </TextButton>
+    )
+
+  return (
+    <div>
+      <TextButton onClick={handleBridgeActionButton} disabled={isDisabled}>
+        {buttonLabel}
+      </TextButton>
+    </div>
+  )
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [isOpen, setIsOpen] = useState(false)
+  const [selectNetwork, setSelectNetwork] = useState<boolean>(false)
+  const [selectToken, setSelectToken] = useState<boolean>(false)
+  const [isSend, setIsSend] = useState<null | boolean>(null)
+  const [showSBTModal, setShowSBTModal] = useState(false)
+  const [checkingSBT, setCheckingSBT] = useState(false)
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const {
+    address: metaMaskAddress,
+    isConnected: isMetaMaskConnected,
+    connect: connectMetaMask,
+    disconnect: disconnectMetaMask,
+  } = useMetaMask()
+
+  const {
+    account: aztecAccount,
+    address: aztecAddress,
+    isConnected: isAztecConnected,
+    isConnecting: isAztecConnecting,
+    connect: connectAztec,
+    disconnect: disconnectAztec,
+  } = useAztecWallet()
+
+  const {
+    loading,
+    error,
+    l1Balance,
+    l2Balance,
+    getL1Balance,
+    getL2Balance,
+    bridgeTokensToL2,
+    withdrawTokensToL1,
+    getL2ToL1MessageMembershipWitness,
+    mintL1Tokens,
+    // hasSBT,
+    // mintSBT,
+  } = useBridge()
+
+  // console.log({
+  //   error,
+  //   l1Balance,
+  //   l2Balance,
+  // })
+
+  const [networkData, setNetworkData] = useState(networks)
+  const [tokensData, setTokensData] = useState(tokens)
+  const [bridgeComplete, setBridgeComplete] = useState(false)
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [inputAmount, setInputAmount] = useState<string>('10')
+  const [usdValue, setUsdValue] = useState<string>('$0.00')
+  const [localL1Balance, setLocalL1Balance] = useState(l1Balance)
+  const [localL2Balance, setLocalL2Balance] = useState(l2Balance)
+  const [hasSoulboundToken, setHasSoulboundToken] = useState<boolean | null>(
+    null
+  )
+  const [hasAztecSBT, setHasAztecSBT] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    setLocalL1Balance(l1Balance)
+    setLocalL2Balance(l2Balance)
+  }, [l1Balance, l2Balance])
+
+  const handleSBTMinted = async () => {
+    if (isWithdrawing) {
+      setHasSoulboundToken(true)
+    } else {
+      setHasAztecSBT(true)
+    }
+    setShowSBTModal(false)
+    // await mintSBT()
+
+    // Bridge logic now handled in BridgeActionButton
+    // handleBridgeOrWithdraw()
+  }
+
+  const handleSwap = () => {
+    setTokensData({ send: tokensData?.received, received: tokensData?.send })
+    setNetworkData({ send: networkData?.received, received: networkData?.send })
+    setIsWithdrawing(!isWithdrawing)
+    setInputAmount('')
+  }
+
+  const handleAmountChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    if (value === '' || !isNaN(Number(value))) {
+      setInputAmount(value)
+    }
+  }
+
+  return (
+    <>
+      <RootStyle>
+        <div className=''>
+          <div className=' bg-latest-grey-200 p-5 py-3'>
+            <div className='flex items-center gap-3 max-w-[150px] mx-auto rounded-full bg-white px-4 py-1'>
+              <StyledImage
+                src='/assets/svg/bridgeIcon.svg'
+                alt=''
+                className='h-5 w-5 '
+              />
+              <p
+                className=' font-bold text-20  cursor-pointer'
+                onClick={() => {
+                  disconnectMetaMask()
+                  disconnectAztec()
+                  // mintL1Tokens()
+                }}>
+                {' '}
+                BRIDGE
+              </p>
+            </div>
+
+            <div className='mt-5 bg-white rounded-md p-4 relative'>
+              <p className='text-14 font-semibold   text-latest-grey-100'>
+                From
+              </p>
+              {/* section1 */}
+              <div className='flex justify-between'>
+                <div className='mt-4 flex gap-2 items-center rounded-[12px]  cursor-pointer bg-latest-grey-200 p-[2px] max-w-[172px] '>
+                  <StyledImage
+                    src={networkData?.send?.img || '/assets/svg/ethLogo.svg'}
+                    alt=''
+                    className='h-6 w-6'
+                  />
+                  <p className='text-16 font-medium text-latest-black-100  w-[106px]'>
+                    {networkData?.send?.title}
+                  </p>
+                  <StyledImage
+                    src='/assets/svg/dropDown.svg'
+                    alt=''
+                    className='h-2.5 w-1.5 p-1.5 mr-1.5 '
+                  />
+                </div>
+                <div className='mt-4 flex gap-2  items-center rounded-md cursor-pointer bg-latest-grey-200 p-[2px]  '>
+                  <StyledImage
+                    src={tokensData?.send?.img || '/assets/svg/USDC.svg'}
+                    alt=''
+                    className='h-6 w-6'
+                  />
+                  <p className='text-16 font-medium text-latest-black-100  '>
+                    {tokensData?.send?.title}
+                  </p>
+                  <StyledImage
+                    src='/assets/svg/dropDown.svg'
+                    alt=''
+                    className='h-2.5 w-1.5 p-1.5 mr-1.5 '
+                  />
+                </div>
+              </div>
+              <hr className=' text-latest-grey-300 my-3' />
+              <div className='flex justify-between my-1'>
+                <input
+                  type='text'
+                  placeholder='0'
+                  value={inputAmount}
+                  onChange={handleAmountChange}
+                  className=' max-w-[190px] placeholder-latest-grey-400 outline-none bg-[transparent] text-32 font-medium'
+                />
+                <div className='flex gap-2'>
+                  <p className=' text-latest-grey-500 text-12 font-medium'>
+                    Balance:
+                  </p>
+                  <p className='text-latest-grey-500 text-12 font-medium break-all'>
+                    {isWithdrawing ? l2Balance : l1Balance} USDC
+                  </p>
+                </div>
+              </div>
+              <div className='flex justify-between mt-2'>
+                <p className='text-16 font-medium text-latest-grey-500'>
+                  {/* {usdValue} */}
+                </p>
+                <p
+                  className='text-14 font-medium text-latest-black-200 bg-latest-grey-200 px-2.5 rounded-[32px] h-5 cursor-pointer'
+                  onClick={() =>
+                    setInputAmount(isWithdrawing ? (l2Balance || '0') : (l1Balance || '0'))
+                  }>
+                  Max
+                </p>
+              </div>
+              <div className='absolute mb-0 bottom-[-30px] left-0 right-0 text-center '>
+                <button onClick={handleSwap} className='mx-auto w-10 h-10   '>
+                  <StyledImage
+                    src='/assets/svg/swap.svg'
+                    alt=''
+                    className='h-10 w-10'
+                  />{' '}
+                </button>
+              </div>
+            </div>
+
+            {/* section2 */}
+            <div className='mt-2 bg-white rounded-md  p-4'>
+              <p className='text-14 font-regular text-latest-grey-100 '>To</p>
+              <div className='flex justify-between'>
+                <div className='mt-4 flex gap-2 items-center rounded-[12px] cursor-pointer bg-latest-grey-200  p-[2px] max-w-[172px] '>
+                  <StyledImage
+                    src={networkData?.received?.img || '/assets/svg/aztec.svg'}
+                    alt=''
+                    className='h-6 w-6'
+                  />
+                  <p className='text-16 font-medium text-latest-black-100  w-[106px]'>
+                    {networkData?.received?.title}
+                  </p>
+                  <StyledImage
+                    src='/assets/svg/dropDown.svg'
+                    alt=''
+                    className='h-2.5 w-1.5 p-1.5 mr-1.5 '
+                  />
+                </div>
+                <div className='mt-4 flex gap-2 items-center rounded-md cursor-pointer bg-latest-grey-200  p-[2px]  '>
+                  <StyledImage
+                    src={tokensData?.received?.img || '/assets/svg/ethLogo.svg'}
+                    alt=''
+                    className='h-6 w-6'
+                  />
+                  <p className='text-16 font-medium text-latest-black-100 '>
+                    {tokensData?.received?.title}
+                  </p>
+                  <StyledImage
+                    src='/assets/svg/dropDown.svg'
+                    alt=''
+                    className='h-2.5 w-1.5 p-1.5 mr-1.5 '
+                  />
+                </div>
+              </div>
+              <hr className=' text-latest-grey-300  my-3' />
+              <div className='flex justify-between'>
+                <p className='text-14 font-medium text-latest-grey-100 '>
+                  You will receive
+                </p>
+                <p className='text-black text-14 font-semibold'>
+                  {inputAmount} USDC
+                </p>
+              </div>
+
+              <div className='flex justify-between mt-2'>
+                <p className='text-latest-grey-500 text-12 font-medium'>
+                  Current Balance:
+                </p>
+                <p className='text-latest-grey-500 text-12 font-medium break-all'>
+                  {isWithdrawing ? l1Balance : l2Balance} USDC
+                </p>
+              </div>
+            </div>
+
+            <div
+              className={clsxm(
+                'rounded-md bg-white mt-2 p-4 transition-all duration-400 ease-in-out',
+                isOpen ? 'h-[244px]' : 'h-[54px]'
+              )}>
+              <button
+                className='flex justify-between font-semibold w-full'
+                onClick={() => setIsOpen(!isOpen)}>
+                Transaction breakdown
+                <span className=''>
+                  <StyledImage
+                    src='/assets/svg/buttons.svg'
+                    className={clsxm(
+                      'w-6 h-6 ',
+                      isOpen &&
+                        ' transition-transform duration-200 ease-in-out rotate-90'
+                    )}
+                    alt='open'
+                  />
+                </span>
+              </button>
+              {isOpen && (
+                <div>
+                  <div className='mt-4 flex justify-between'>
+                    <p className='text-sm font-medium text-latest-grey-700'>
+                      Time to Aztec
+                    </p>
+                    <p className='text-latest-black-300 text-14 font-medium'>
+                      ~2 mins
+                    </p>
+                  </div>
+                  <div className='mt-[14px] flex justify-between'>
+                    <p className='text-sm font-medium text-latest-grey-700'>
+                      Net fee
+                    </p>
+                    <p className='text-latest-black-300 text-14 font-medium'>
+                      $ 0.04
+                    </p>
+                  </div>
+                  <div className='mt-[14px] flex justify-between'>
+                    <div className='flex gap-1 items-center text-center'>
+                      {' '}
+                      <p className='text-sm font-medium text-latest-grey-700'>
+                        Bridge fee
+                      </p>
+                      <StyledImage
+                        src='/assets/svg/info.svg'
+                        alt=''
+                        className='h-4 w-4'
+                      />
+                    </div>
+                    <p className=' text-latest-grey-100 text-14 font-medium'>
+                      $ 0.01{' '}
+                      <span className='text-latest-black-300'>
+                        {' '}
+                        0.0000029 ETH
+                      </span>
+                    </p>
+                  </div>
+                  <div className='mt-[14px] flex justify-between'>
+                    <div className='flex gap-1 items-center '>
+                      {' '}
+                      <p className='text-sm font-medium text-latest-grey-700'>
+                        Destination <br /> Gas fee
+                      </p>
+                      <StyledImage
+                        src='/assets/svg/info.svg'
+                        alt=''
+                        className='h-4 w-4'
+                      />
+                    </div>
+                    <p className=' text-latest-grey-100 text-14 font-medium'>
+                      $ 0.03{' '}
+                      <span className='text-latest-black-300'>
+                        {' '}
+                        0.0000103 ETH
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className='bg-white rounded-md pt-4 px-5'>
+            <div className='pb-4'>
+              <BridgeActionButton
+                inputAmount={inputAmount}
+                setInputAmount={setInputAmount}
+              />
+            </div>
+            <div className='flex justify-center gap-2 pb-3'>
+              <StyledImage
+                src='/assets/svg/silk0.4.svg'
+                alt=''
+                className='h-4 w-[14px]'
+              />
+              <p className='text-12 font-medium text-latest-grey-600'>
+                Secured by Human Wallet
+              </p>
+            </div>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+      </RootStyle>
+    </>
+  )
 }
